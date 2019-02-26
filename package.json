@@ -1,0 +1,19 @@
+{
+  "name": "parallel-crawler",
+  "version": "1.0.0",
+  "description": "Crawl pages listed in input file using multiple puppeteer instances using puppeter cluster",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Avinash Shenoy",
+  "license": "ISC",
+  "dependencies": {
+    "async": "^2.6.2",
+    "await-sleep": "0.0.1",
+    "chalk": "^2.4.2",
+    "debug": "^4.1.1",
+    "puppeteer": "^1.12.2",
+    "puppeteer-cluster": "^0.12.1"
+  }
+}
