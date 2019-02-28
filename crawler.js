@@ -42,7 +42,7 @@ Crawler.prototype.crawl = async function() {
 
 	const cluster = await Cluster.launch({
 		concurrency: Cluster.CONCURRENCY_BROWSER,
-		maxConcurrency: 1,
+		maxConcurrency: 5,
 		monitor: true,
 		/*
 		puppeteerOptions: {
@@ -54,17 +54,18 @@ Crawler.prototype.crawl = async function() {
 	console.log(logUtils.ok("Cluster initialized"));
 
 	await cluster.task(async ({ page, data: url }) => {
+		// debug logging messages from the page
+		page.on("console", function(msg) {
+			debug(`Frame: ${msg.text()}`);
+		});
+
 		page.on("load", async function() {
 			console.log(chalk.green("Page load complete for url: " + url));
 			// Evaluate for BOOMR
 			let boomrJSHandle;
+			try {
 			boomrJSHandle = await page.evaluateHandle(() => {
 				return Promise.resolve(window.BOOMR ? JSON.stringify(window.BOOMR.version) : undefined);
-			});
-
-			// debug logging messages from the page
-			page.on("console", function(msg) {
-				debug(`Frame: ${msg.text()}`);
 			});
 
 			if (boomrJSHandle) {
@@ -80,10 +81,13 @@ Crawler.prototype.crawl = async function() {
 			} else {
 				// BOOMR not defined
 				console.log("Page does not have Boomerang instrumented");
-				outBoomrVersion.write(url + ",NoBoomR");
+				outBoomrVersion.write(url + ",NoBoomR\n");
+			}
+			} catch (postPLError) {
+				console.log("Ran into error inside page load for URL: " + url + "; error: " + postPLError);
+				outBoomrVersion.write(url + ", Error during page load handling\n");
 			}
 		}.bind(this));
-
 
 		try {
 			await page.goto(url, {
@@ -94,71 +98,48 @@ Crawler.prototype.crawl = async function() {
             console.log("Crawl timeout: " + url);
             outBoomrVersion.write(url + ", Page load timed out\n");
         }
-        //console.log("Done loading site: sleep for 2 seconds");
-        await sleep(1000);
 	});
 
 	cluster.on('taskerror', (err, data) => {
 		console.log(`Error crawling ${data}: ${err.message}`);
-	});
-
-	
-	try {
-		var domain = "walmart.com";
-
-		var resolvedDomain = await doesDomainNameResolve(domain);
-		console.log("promise result: " + resolvedDomain);
-	}
-	catch (error){
-		console.log("Caught promise reject error: " + error);
-	}
-	
+	});	
 
 	// run through each page
     for (var inputUrl of this.sites) {
-        //console.log("From file, Got URL: " + url);
+        // There is some random crap at the end of the URL string that we 
+        // get from ROSE tool, take it out.
+        inputUrl = inputUrl.substring(0, inputUrl.length-1);
 
         if (inputUrl.indexOf("http://") !== 0 &&
             inputUrl.indexOf("https://") !== 0) {
             // start with the HTTP site
-            //url = "http://" + url + "/";
             urlToCheck = "http://" + inputUrl;
         }
+        else {
+        	urlToCheck = inputUrl;
+        }
 
-        //console.log("Resolving domain: " + chalk.underline(url));
         try {
         	var resolvedDomain = undefined;
         	if (inputUrl.indexOf("www.") === 0) {
-        		resolvedDomain = await doesDomainNameResolve(inputUrl.substring(4));
+        		resolvedDomain = await doesDomainNameResolve(inputUrl.substring(4, inputUrl.length));
         	} else {
         		resolvedDomain = await doesDomainNameResolve(inputUrl);
         	}
 			console.log("promise result: " + resolvedDomain);
-		} catch (error) {
-			console.log("Caught promise reject error: " + error);
-		}
-
-        /*
-        try {
-	        var domainResolved = await doesDomainNameResolve(url);
-	        if (domainResolved && domainResolved === true) {
-	        	console.log(logUtils.ok(url));
-				//
+			if (resolvedDomain) {
+				// Domain resolved; queue it in task pool
 				// Add the specified URL to the cluster task pool
 				//
-				await cluster.queue(url);
-	        }
-	        else {
-	        	console.log("Didnt resolve successfully: " + url);
-	        	console.log(logUtils.error);
-	        	outBoomrVersion.write(url + ", Domain name unresolved\n");
-	        }
-	    }
-	    catch(err) {
-	    	console.log("Didnt resolve successfully: " + url + "; Marking and Skipping");
-	    	outBoomrVersion.write(url + ", Domain name unresolved\n");
-	    }
-	    */
+				await cluster.queue(urlToCheck);
+			}
+			else {
+				outBoomrVersion.write(inputUrl + ", Domain name unresolved\n");
+			}
+		} catch (error) {
+			console.log("Caught promise reject error for url: " + inputUrl + "; error: "+ error);
+			outBoomrVersion.write(inputUrl + ", Domain name unresolved\n");
+		}
     }
 
 	await cluster.idle();
@@ -172,65 +153,13 @@ async function doesDomainNameResolve(domainToCheck) {
 		var dns = require('native-dns');
 		var ip = undefined;
 
-		/*
-		dns.resolve(domainToCheck, function(error, results) {
-			var i;
-			if (!error) {
-				if (results) {
-					for (i = 0; i < results.length; i++) {
-						console.log(domainToCheck, results[i]);
-						resolve(true);
-					}
-				} else {
-					console.log("resolved but empty result: " + results);
-					resolve(false);
-				}
+		dns.lookup(domainToCheck, function(err, family, result) {
+			if (!err) {
+				resolve(family);
 			} else {
-				console.log("Rejecting promise. Hit Error: " + error);
-				reject(error);
+				reject(err);
 			}
 		});
-		*/
-		
-		var question = dns.Question({
-			name: domainToCheck,
-			type: 'A',
-		});
-
-		var start = Date.now();
-
-		var req = dns.Request({
-			question: question,
-			server: {
-				address: '8.8.8.8',
-				port: 53,
-				type: 'udp'
-			},
-			timeout: 2000,
-		});
-
-		req.on('timeout', function() {
-			console.log('Timeout in making DNS request to: ' + domainToCheck);
-			resolve(false);
-		});
-
-		req.on('message', function(err, answer) {
-			answer.answer.forEach(function(a) {
-				console.log('For domain: ' + domainToCheck + ', answer: ' + a.address);
-				if (a.address) {
-					ip = a.address;
-				}
-			});
-		});
-
-		req.on('end', function() {
-			var delta = (Date.now()) - start;
-			console.log('For domain: ' + domainToCheck + 'Finished processing request: ' + delta.toString() + 'ms');
-			resolve(ip);
-		});
-
-		req.send();
-		
 
 	});
 }
