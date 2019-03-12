@@ -23,10 +23,10 @@ if (process.argv[2].indexOf("http") === 0) {
     sites = [process.argv[2]];
 } else {
     // if given a nuber, load that many sites from the CSV
-    const numberOfSites = process.argv[2];
+    const numberOfSites = parseInt(process.argv[2], 10);
     let upperRangeOfIndex = undefined;
     if (process.argv[3]) {
-    	upperRangeOfIndex = process.argv[3];
+    	upperRangeOfIndex = parseInt(process.argv[3], 10);
     }
 
     console.log("lower index: " + numberOfSites);
@@ -52,4 +52,11 @@ if (process.argv[2].indexOf("http") === 0) {
 
 // call Crawler
 var crawler = new Crawler(sites);
-crawler.crawl();
+try {
+	crawler.crawl();	
+} catch (err)
+{
+	console.log("Global error catch: " + err);
+	console.log(err);
+}
+

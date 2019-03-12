@@ -8,7 +8,6 @@ const puppeteer = require("puppeteer");
 const chalk = require("chalk");
 const logUtils = require("log-utils");
 const sleep = require("await-sleep");
-//const limit = require("limit-string-length");
 const { URL } = require("url");
 const fs = require("fs");
 const { Cluster } = require("puppeteer-cluster");
@@ -17,10 +16,6 @@ const { Cluster } = require("puppeteer-cluster");
 var outSites = fs.createWriteStream("output-sites.json");
 var outUrls = fs.createWriteStream("output-urls.json");
 var outBoomrVersion = fs.createWriteStream("output-boomr-version.csv");
-
-// DNS
-//var dns = require('native-dns');
-//var util = require('util');
 
 //
 // Functions
@@ -41,15 +36,16 @@ Crawler.prototype.crawl = async function() {
 	let urlToCheck = undefined;
 
 	const cluster = await Cluster.launch({
-		concurrency: Cluster.CONCURRENCY_BROWSER,
-		maxConcurrency: 5,
+		//concurrency: Cluster.CONCURRENCY_BROWSER,
+		concurrency: Cluster.CONCURRENCY_CONTEXT,
+		maxConcurrency: 20,
 		monitor: true,
 		/*
 		puppeteerOptions: {
 			headless: false
 		},
 		*/
-		timeout: 60000
+		timeout: 30000
 	});
 	console.log(logUtils.ok("Cluster initialized"));
 
@@ -61,32 +57,61 @@ Crawler.prototype.crawl = async function() {
 
 		page.on("load", async function() {
 			console.log(chalk.green("Page load complete for url: " + url));
+
+			let pageData = [];
+			pageData.push(url);
+
 			// Evaluate for BOOMR
 			let boomrJSHandle;
 			try {
-			boomrJSHandle = await page.evaluateHandle(() => {
-				return Promise.resolve(window.BOOMR ? JSON.stringify(window.BOOMR.version) : undefined);
-			});
+				boomrJSHandle = await page.evaluateHandle(() => {
+					return Promise.resolve(window.BOOMR ? JSON.stringify(window.BOOMR.version) : undefined);
+				});
 
-			if (boomrJSHandle) {
-				let boomrVersion = await boomrJSHandle.jsonValue();
-				console.log("BOOMR: " + boomrVersion);
+				if (boomrJSHandle) {
+					let boomrVersion = await boomrJSHandle.jsonValue();
+					console.log("BOOMR: " + boomrVersion);
 
-				if (boomrVersion) {
-					outBoomrVersion.write(url + ", " + boomrVersion);
+					if (boomrVersion) {
+						pageData.push(boomrVersion);
+					} else {
+						pageData.push("No Boomerang");
+					}
 				} else {
-					outBoomrVersion.write(url + ", No Boomerang");
+					// BOOMR not defined
+					console.log("Page does not have Boomerang instrumented");
+					pageData.push("No Boomerang");
 				}
-				outBoomrVersion.write("\n");
-			} else {
-				// BOOMR not defined
-				console.log("Page does not have Boomerang instrumented");
-				outBoomrVersion.write(url + ",NoBoomR\n");
-			}
 			} catch (postPLError) {
-				console.log("Ran into error inside page load for URL: " + url + "; error: " + postPLError);
-				outBoomrVersion.write(url + ", Error during page load handling\n");
+				console.log("Ran into error while evaluating boomerang for URL: " + url + "; error: " + postPLError);
+				pageData.push("Error during BOOMR version analysis");
 			}
+
+			let rumJSHandle;
+			try {
+				rumJSHandle = await page.evaluateHandle(() => {
+					return Promise.resolve(window.AKSB ? JSON.stringify(window.AKSB.aksbVersion()) : undefined);
+				});
+
+				if (rumJSHandle) {
+					let akVersion = await rumJSHandle.jsonValue();
+					console.log("AKVersion: " + akVersion);
+
+					if (akVersion) {
+						pageData.push(akVersion);
+					} else {
+						pageData.push("No Akamai Rum");
+					}
+				} else {
+					pageData.push("No Akamai Rum");
+				}
+
+			} catch (akRumCheckError) {
+				console.log("Ran into error while evaluating Akamai RUM for URL: " + url + "; error: " + akRumCheckError);
+				pageData.push("Error during AKVersion version analysis");
+			}
+
+			outBoomrVersion.write(pageData.join() + "\n");
 		}.bind(this));
 
 		try {
@@ -104,6 +129,7 @@ Crawler.prototype.crawl = async function() {
 		console.log(`Error crawling ${data}: ${err.message}`);
 	});	
 
+	try {
 	// run through each page
     for (var inputUrl of this.sites) {
         // There is some random crap at the end of the URL string that we 
@@ -118,6 +144,8 @@ Crawler.prototype.crawl = async function() {
         else {
         	urlToCheck = inputUrl;
         }
+
+        urlToCheck = urlToCheck + "/?akamai-rum=on";
 
         try {
         	var resolvedDomain = undefined;
@@ -141,6 +169,10 @@ Crawler.prototype.crawl = async function() {
 			outBoomrVersion.write(inputUrl + ", Domain name unresolved\n");
 		}
     }
+	} catch(traversalError) {
+		console.log("Error while traversing host list: " + traversalError);
+		console.log(traversalError);
+	}
 
 	await cluster.idle();
 	console.log("Closing cluster");
@@ -153,13 +185,18 @@ async function doesDomainNameResolve(domainToCheck) {
 		var dns = require('native-dns');
 		var ip = undefined;
 
-		dns.lookup(domainToCheck, function(err, family, result) {
-			if (!err) {
-				resolve(family);
-			} else {
-				reject(err);
-			}
-		});
+		try {
+
+			dns.lookup(domainToCheck, function(err, family, result) {
+				if (!err) {
+					resolve(family);
+				} else {
+					reject(err);
+				}
+			});
+		} catch (dnsError) {
+			reject(dnsError);
+		}
 
 	});
 }
