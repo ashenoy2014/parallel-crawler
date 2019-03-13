@@ -38,7 +38,7 @@ Crawler.prototype.crawl = async function() {
 	const cluster = await Cluster.launch({
 		//concurrency: Cluster.CONCURRENCY_BROWSER,
 		concurrency: Cluster.CONCURRENCY_CONTEXT,
-		maxConcurrency: 20,
+		maxConcurrency: 30,
 		monitor: true,
 		/*
 		puppeteerOptions: {
