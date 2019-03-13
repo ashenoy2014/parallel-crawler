@@ -15,7 +15,7 @@ const { Cluster } = require("puppeteer-cluster");
 // create output streams
 var outSites = fs.createWriteStream("output-sites.json");
 var outUrls = fs.createWriteStream("output-urls.json");
-var outBoomrVersion = fs.createWriteStream("output-boomr-version.csv");
+var outBoomrVersion = fs.createWriteStream("output-boomr-version-" + Date.now() + ".csv");
 
 //
 // Functions
