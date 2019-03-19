@@ -38,21 +38,30 @@ Crawler.prototype.crawl = async function() {
 	const cluster = await Cluster.launch({
 		//concurrency: Cluster.CONCURRENCY_BROWSER,
 		concurrency: Cluster.CONCURRENCY_CONTEXT,
-		maxConcurrency: 30,
+		maxConcurrency: 3,
 		monitor: true,
 		/*
 		puppeteerOptions: {
-			headless: false
+			headless: false,
+			devtools: true,
 		},
 		*/
-		timeout: 30000
+		timeout: 120000
 	});
 	console.log(logUtils.ok("Cluster initialized"));
 
 	await cluster.task(async ({ page, data: url }) => {
 		// debug logging messages from the page
 		page.on("console", function(msg) {
-			debug(`Frame: ${msg.text()}`);
+			console.log(`Frame: ${msg.text()}`);
+		});
+
+		page.on("error", function(msg) {
+			console.log("Error event for url: " + url + "; Error: " + msg);
+		});
+
+		page.on("pageerror", function(msg) {
+			console.log("PageError event for url: " + url + "; Error: " + msg);
 		});
 
 		page.on("load", async function() {
@@ -64,9 +73,15 @@ Crawler.prototype.crawl = async function() {
 			// Evaluate for BOOMR
 			let boomrJSHandle;
 			try {
-				boomrJSHandle = await page.evaluateHandle(() => {
-					return Promise.resolve(window.BOOMR ? JSON.stringify(window.BOOMR.version) : undefined);
+				boomrJSHandle = await page.evaluateHandle(async () => {
+					try {
+						return Promise.resolve(window.BOOMR ? JSON.stringify(window.BOOMR.version) : undefined);
+					} catch (handleError) {
+						console.log("Target error for url: " + url + "; error: " + handleError);
+						return Promise.resolve(undefined);
+					}
 				});
+				console.log("Evaluated BOOMR for "+ url);
 
 				if (boomrJSHandle) {
 					let boomrVersion = await boomrJSHandle.jsonValue();
@@ -89,7 +104,8 @@ Crawler.prototype.crawl = async function() {
 
 			let rumJSHandle;
 			try {
-				rumJSHandle = await page.evaluateHandle(() => {
+				rumJSHandle = await page.evaluateHandle(async () => {
+					//debugger;
 					return Promise.resolve(window.AKSB ? JSON.stringify(window.AKSB.aksbVersion()) : undefined);
 				});
 
@@ -117,7 +133,7 @@ Crawler.prototype.crawl = async function() {
 		try {
 			await page.goto(url, {
 			                waitUntil: ["networkidle2", "load"],
-			                timeout: 60000
+			                timeout: 120000
 			            });
 		} catch (e) {
             console.log("Crawl timeout: " + url);
