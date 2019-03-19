@@ -38,7 +38,7 @@ Crawler.prototype.crawl = async function() {
 	const cluster = await Cluster.launch({
 		//concurrency: Cluster.CONCURRENCY_BROWSER,
 		concurrency: Cluster.CONCURRENCY_CONTEXT,
-		maxConcurrency: 3,
+		maxConcurrency: 5,
 		monitor: true,
 		/*
 		puppeteerOptions: {
@@ -64,6 +64,7 @@ Crawler.prototype.crawl = async function() {
 			console.log("PageError event for url: " + url + "; Error: " + msg);
 		});
 
+		/*
 		page.on("load", async function() {
 			console.log(chalk.green("Page load complete for url: " + url));
 
@@ -129,14 +130,82 @@ Crawler.prototype.crawl = async function() {
 
 			outBoomrVersion.write(pageData.join() + "\n");
 		}.bind(this));
+		*/
 
 		try {
 			await page.goto(url, {
 			                waitUntil: ["networkidle2", "load"],
-			                timeout: 120000
+			                timeout: 60000
 			            });
+
+			// Successfully loaded page, lets now check for BOOMR and AKSB script presence and version.
+			//*********************
+			console.log(chalk.green("Page load complete for url: " + url));
+
+			let pageData = [];
+			pageData.push(url);
+
+			// Evaluate for BOOMR
+			let boomrJSHandle;
+			try {
+				boomrJSHandle = await page.evaluateHandle(async () => {
+					try {
+						return Promise.resolve(window.BOOMR ? JSON.stringify(window.BOOMR.version) : undefined);
+					} catch (handleError) {
+						console.log("Target error for url: " + url + "; error: " + handleError);
+						return Promise.resolve(undefined);
+					}
+				});
+				console.log("Evaluated BOOMR for "+ url);
+
+				if (boomrJSHandle) {
+					let boomrVersion = await boomrJSHandle.jsonValue();
+					console.log("BOOMR: " + boomrVersion);
+
+					if (boomrVersion) {
+						pageData.push(boomrVersion);
+					} else {
+						pageData.push("No Boomerang");
+					}
+				} else {
+					// BOOMR not defined
+					console.log("Page does not have Boomerang instrumented");
+					pageData.push("No Boomerang");
+				}
+			} catch (postPLError) {
+				console.log("Ran into error while evaluating boomerang for URL: " + url + "; error: " + postPLError);
+				pageData.push("Error during BOOMR version analysis");
+			}
+
+			let rumJSHandle;
+			try {
+				rumJSHandle = await page.evaluateHandle(async () => {
+					//debugger;
+					return Promise.resolve(window.AKSB ? JSON.stringify(window.AKSB.aksbVersion()) : undefined);
+				});
+
+				if (rumJSHandle) {
+					let akVersion = await rumJSHandle.jsonValue();
+					console.log("AKVersion: " + akVersion);
+
+					if (akVersion) {
+						pageData.push(akVersion);
+					} else {
+						pageData.push("No Akamai Rum");
+					}
+				} else {
+					pageData.push("No Akamai Rum");
+				}
+
+			} catch (akRumCheckError) {
+				console.log("Ran into error while evaluating Akamai RUM for URL: " + url + "; error: " + akRumCheckError);
+				pageData.push("Error during AKVersion version analysis");
+			}
+
+			outBoomrVersion.write(pageData.join() + "\n");
+			//*********************
 		} catch (e) {
-            console.log("Crawl timeout: " + url);
+            console.log("Crawl timeout| page load timeout: " + url, e);
             outBoomrVersion.write(url + ", Page load timed out\n");
         }
 	});
